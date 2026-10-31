@@ -1,0 +1,22 @@
+# Frontend dependencies and generated files
+node_modules/
+dist/
+.vite/
+
+# Rust and Tauri build output
+/target/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+
+# Downloaded Waifu2x runtime and models (prepared by scripts/prepare-waifu2x.mjs)
+/src-tauri/resources/waifu2x/*
+!/src-tauri/resources/waifu2x/.gitkeep
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# OS/editor files and logs
+.DS_Store
+*.log
