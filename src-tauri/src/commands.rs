@@ -12,8 +12,20 @@ use crate::processing::{
     transform::ImageAdjustments,
     waifu,
 };
-use std::path::Path;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tauri::AppHandle;
+
+struct TemporaryImage(PathBuf);
+
+impl Drop for TemporaryImage {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 
 #[tauri::command]
 pub async fn waifu2x_process(
@@ -125,8 +137,37 @@ pub async fn merge_and_split(
 ) -> Result<String, String> {
     common::validate_split_options(height, &mode, same_size)?;
     tauri::async_runtime::spawn_blocking(move || {
-        // Évite l'écriture puis la relecture d'un énorme fichier temporaire.
         common::ensure_no_existing_pages(Path::new(&output))?;
+        if merge::requires_mapped_processing(&files, &adjustments)? {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let merged = TemporaryImage(std::env::temp_dir().join(format!(
+                "komatool-fusion-decoupe-{}-{stamp}.png",
+                std::process::id()
+            )));
+            merge::merge_images(&app, &files, &merged.0, &adjustments)?;
+            common::emit_progress(&app, 92.0, "Préparation du découpage par blocs…");
+            let request = AdvancedSplitRequest {
+                source: merged.0.to_string_lossy().into_owned(),
+                output: output.clone(),
+                height,
+                mode: mode.clone(),
+                png,
+                same_size,
+                rows: 1,
+                columns: 1,
+                prefix: "page_".into(),
+                start_number: 1,
+                adjustments: ImageAdjustments::default(),
+            };
+            let count = advanced_split::run(&app, &request, None, 92.0, 8.0)?;
+            return Ok(format!(
+                "Fusion et découpe terminées : {count} pages créées."
+            ));
+        }
+        // Pour les formats usuels, garder le chemin direct évite l'écriture puis la relecture.
         let merged = merge::compose_images(&app, &files, false, &adjustments)?;
         common::emit_progress(&app, 92.0, "Préparation du découpage…");
         let count = split::split_decoded(

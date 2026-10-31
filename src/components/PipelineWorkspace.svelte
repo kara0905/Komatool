@@ -180,20 +180,20 @@
 </script>
 
 <div class="pipeline-layout">
+  {#if saved.length}
+    <div class="pipeline-saved-toolbar">
+      <SelectField label="Configurations enregistrées" bind:value={selectedSaved} options={saved.map((item, index) => ({ value: String(index), label: item.name }))} />
+      <button class="icon-btn" aria-label="Charger la configuration" title="Charger" onclick={loadPipeline}><ArrowDown size={15} /></button>
+      <button class="icon-btn remove" aria-label="Supprimer la configuration" title="Supprimer" onclick={deletePipeline}><Trash2 size={15} /></button>
+    </div>
+  {/if}
+
   <section class="panel pipeline-builder">
     <div class="panel-head">
       <div class="step">01</div>
       <div><h2>Construire le pipeline</h2><p>Ajoute les opérations et règle chacune d’elles.</p></div>
     </div>
     <label class="pipeline-name">Nom de la configuration<input bind:value={name} maxlength="48" placeholder="Ex. Préparer un chapitre" /></label>
-
-    {#if saved.length}
-      <div class="pipeline-saved-row">
-        <SelectField label="Configurations enregistrées" bind:value={selectedSaved} options={saved.map((item, index) => ({ value: String(index), label: item.name }))} />
-        <button class="icon-btn" aria-label="Charger la configuration" title="Charger" onclick={loadPipeline}><ArrowDown size={15} /></button>
-        <button class="icon-btn remove" aria-label="Supprimer la configuration" title="Supprimer" onclick={deletePipeline}><Trash2 size={15} /></button>
-      </div>
-    {/if}
 
     <div class="pipeline-steps">
       {#each steps as step, index (step.id)}

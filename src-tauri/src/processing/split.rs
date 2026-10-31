@@ -32,13 +32,30 @@ pub(crate) fn smart_boundaries(
     img: &RgbaImage,
     target_height: u32,
     parallel_threshold: u32,
+    report_progress: impl FnMut(usize, usize),
+) -> Result<Vec<(u32, u32)>, String> {
+    smart_boundaries_raw(
+        img.as_raw(),
+        img.width(),
+        img.height(),
+        target_height,
+        parallel_threshold,
+        report_progress,
+    )
+}
+
+/// Variante qui analyse directement un tampon RGBA, y compris lorsqu'il est mappé sur disque.
+pub(crate) fn smart_boundaries_raw(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    target_height: u32,
+    parallel_threshold: u32,
     mut report_progress: impl FnMut(usize, usize),
 ) -> Result<Vec<(u32, u32)>, String> {
     // Cette heuristique mesure les changements de couleur, sans reconnaître
     // les cases ni les bulles : elle choisit la ligne la plus uniforme près
     // de chaque hauteur cible.
-    let (width, height) = img.dimensions();
-    let pixels = img.as_raw();
     let step = (width / 700).max(1) as usize;
     let mut bounds = Vec::new();
     let mut top = 0u32;

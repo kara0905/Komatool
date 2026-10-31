@@ -1,6 +1,7 @@
 //! Assemblage vertical d'images, avec estimation préalable des dimensions.
 
 use super::common::*;
+use super::mapped_image::MappedRgba;
 use super::transform::{self, ImageAdjustments};
 use image::{DynamicImage, GenericImage, ImageFormat, RgbImage, RgbaImage};
 use std::{
@@ -9,6 +10,65 @@ use std::{
     path::Path,
 };
 use tauri::AppHandle;
+
+/// Dit si le bitmap complet ou le canevas final dépasse le budget RAM classique.
+pub(crate) fn requires_mapped_processing(
+    files: &[String],
+    adjustments: &ImageAdjustments,
+) -> Result<bool, String> {
+    let mut has_large_source = false;
+    let mut max_width = 0u32;
+    let mut total_height = 0u64;
+    for file in files {
+        let (source_width, source_height) = image::image_dimensions(file)
+            .map_err(|error| format!("Impossible de lire les dimensions de {} : {error}", file))?;
+        has_large_source |= exceeds_in_memory_limit(source_width, source_height);
+        let (width, height) = if let Some(target_width) = adjustments.resize_width {
+            if has_large_source {
+                return Ok(true);
+            }
+            let crop_width = source_width
+                .saturating_sub(adjustments.crop_left.saturating_add(adjustments.crop_right));
+            let crop_height = source_height
+                .saturating_sub(adjustments.crop_top.saturating_add(adjustments.crop_bottom));
+            if crop_width == 0 || crop_height == 0 {
+                return Err("Le recadrage supprimerait toute l'image.".into());
+            }
+            (
+                target_width,
+                ((crop_height as f64 * target_width as f64 / crop_width as f64).round() as u32)
+                    .max(1),
+            )
+        } else {
+            let width = source_width
+                .saturating_sub(adjustments.crop_left.saturating_add(adjustments.crop_right));
+            let height = source_height
+                .saturating_sub(adjustments.crop_top.saturating_add(adjustments.crop_bottom));
+            if width == 0 || height == 0 {
+                return Err("Le recadrage supprimerait toute l'image.".into());
+            }
+            let margin = adjustments
+                .margin
+                .checked_mul(2)
+                .ok_or_else(|| "Marge trop importante.".to_string())?;
+            (
+                width
+                    .checked_add(margin)
+                    .ok_or_else(|| "Dimensions trop importantes.".to_string())?,
+                height
+                    .checked_add(margin)
+                    .ok_or_else(|| "Dimensions trop importantes.".to_string())?,
+            )
+        };
+        max_width = max_width.max(width);
+        total_height = total_height
+            .checked_add(height as u64)
+            .ok_or_else(|| "Dimensions finales trop importantes.".to_string())?;
+    }
+    Ok(has_large_source
+        || total_height > u32::MAX as u64
+        || exceeds_in_memory_limit(max_width, total_height.min(u32::MAX as u64) as u32))
+}
 
 /// Compose les sources de haut en bas et renvoie le canevas final en mémoire.
 pub(crate) fn compose_images(
@@ -110,6 +170,70 @@ pub(crate) fn merge_images(
             "Le fichier {} existe déjà. Choisis un autre nom pour éviter de le remplacer.",
             output.display()
         ));
+    }
+    let requires_mapped = requires_mapped_processing(files, adjustments)?;
+    if requires_mapped && adjustments.resize_width.is_some() {
+        return Err("Le redimensionnement d'une très grande fusion demande encore une grande zone de travail. Enlève ce réglage ou réduis les images avant la fusion.".into());
+    }
+    if adjustments.resize_width.is_none() && files.len() >= 2 {
+        let mut max_width = 0u32;
+        let mut total_height = 0u64;
+        for file in files {
+            let (source_width, source_height) = image::image_dimensions(file).map_err(|error| {
+                format!("Impossible de lire les dimensions de {} : {error}", file)
+            })?;
+            let width = source_width
+                .saturating_sub(adjustments.crop_left.saturating_add(adjustments.crop_right));
+            let height = source_height
+                .saturating_sub(adjustments.crop_top.saturating_add(adjustments.crop_bottom));
+            if width == 0 || height == 0 {
+                return Err("Le recadrage supprimerait toute l'image.".into());
+            }
+            let margin = adjustments
+                .margin
+                .checked_mul(2)
+                .ok_or_else(|| "Marge trop importante.".to_string())?;
+            let width = width
+                .checked_add(margin)
+                .ok_or_else(|| "Dimensions trop importantes.".to_string())?;
+            let height = height
+                .checked_add(margin)
+                .ok_or_else(|| "Dimensions trop importantes.".to_string())?;
+            max_width = max_width.max(width);
+            total_height = total_height
+                .checked_add(height as u64)
+                .ok_or_else(|| "Dimensions finales trop importantes.".to_string())?;
+        }
+        if total_height > u32::MAX as u64 {
+            return Err("La hauteur finale dépasse la limite prise en charge.".into());
+        }
+        let total_height = total_height as u32;
+        if requires_mapped || exceeds_in_memory_limit(max_width, total_height) {
+            emit_progress(app, 1.0, "Préparation de la fusion par blocs…");
+            let mut canvas = MappedRgba::blank(max_width, total_height)?;
+            let mut top = 0u32;
+            for (index, file) in files.iter().enumerate() {
+                let decoded = MappedRgba::open(Path::new(file))?;
+                let source = decoded.crop_and_margin(
+                    adjustments.crop_left,
+                    adjustments.crop_top,
+                    adjustments.crop_right,
+                    adjustments.crop_bottom,
+                    adjustments.margin,
+                )?;
+                canvas.copy_rect_from(&source, 0, 0, source.width, source.height, top)?;
+                top += source.height;
+                emit_progress(
+                    app,
+                    8.0 + (index + 1) as f32 / files.len() as f32 * 82.0,
+                    format!("Fusion par blocs : {} / {}", index + 1, files.len()),
+                );
+            }
+            emit_progress(app, 93.0, "Enregistrement de la grande image…");
+            canvas.save(output, format, 85)?;
+            emit_progress(app, 100.0, "Fusion terminée");
+            return Ok(());
+        }
     }
     let canvas = compose_images(app, files, format == ImageFormat::Jpeg, adjustments)?;
     emit_progress(

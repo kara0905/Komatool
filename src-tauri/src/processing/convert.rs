@@ -1,6 +1,11 @@
 //! Conversion et optimisation d'images en lot, avec refus d'écraser les sorties.
 
-use super::common::{emit_progress, validate_image_size, validate_jpeg_dimensions};
+use super::{
+    common::{
+        emit_progress, exceeds_in_memory_limit, validate_image_size, validate_jpeg_dimensions,
+    },
+    mapped_image::MappedRgba,
+};
 use image::{
     codecs::{
         jpeg::JpegEncoder,
@@ -134,14 +139,40 @@ pub fn process(
     for (index, (source, dest)) in files.iter().zip(destinations.iter()).enumerate() {
         let (width, height) = image::image_dimensions(source)
             .map_err(|e| format!("Impossible de lire les dimensions de {} : {e}", source))?;
+        let start = index as f32 / files.len() as f32 * 100.0;
+        let image_progress = 100.0 / files.len() as f32;
+        if exceeds_in_memory_limit(width, height) {
+            emit_progress(
+                app,
+                start + image_progress * 0.1,
+                format!("Lecture par blocs de l’image {}/{}", index + 1, files.len()),
+            );
+            if matches!(format, OutputFormat::Jpeg) {
+                validate_jpeg_dimensions(width, height)?;
+            }
+            let image = MappedRgba::open(Path::new(source))?;
+            let image_format = match format {
+                OutputFormat::Png => image::ImageFormat::Png,
+                OutputFormat::Jpeg => image::ImageFormat::Jpeg,
+                OutputFormat::Webp => image::ImageFormat::WebP,
+            };
+            image.save(dest, image_format, quality)?;
+            total_after += fs::metadata(dest)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            emit_progress(
+                app,
+                (index + 1) as f32 / files.len() as f32 * 100.0,
+                format!("Image {}/{} terminée", index + 1, files.len()),
+            );
+            continue;
+        }
         validate_image_size(width, height)?;
         if matches!(format, OutputFormat::Jpeg) {
             validate_jpeg_dimensions(width, height)?;
         }
         let image =
             image::open(source).map_err(|e| format!("Impossible d'ouvrir {} : {e}", source))?;
-        let start = index as f32 / files.len() as f32 * 100.0;
-        let image_progress = 100.0 / files.len() as f32;
         emit_progress(
             app,
             start + image_progress * 0.1,

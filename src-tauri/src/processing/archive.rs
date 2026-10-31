@@ -4,13 +4,26 @@ use image::{codecs::jpeg::JpegEncoder, ImageEncoder};
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufReader, BufWriter, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use tauri::AppHandle;
 
-use super::common::{emit_progress, validate_image_size, validate_jpeg_dimensions};
+use super::{
+    common::{
+        emit_progress, exceeds_in_memory_limit, validate_image_size, validate_jpeg_dimensions,
+    },
+    mapped_image::MappedRgba,
+};
 
 const ZIP32_MAX: u64 = u32::MAX as u64;
+
+struct TemporaryOutput(PathBuf);
+
+impl Drop for TemporaryOutput {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 
 fn zip_name(path: &Path, index: usize) -> Vec<u8> {
     let leaf = path
@@ -336,15 +349,29 @@ fn export_pdf(files: &[String], output: &Path, app: &AppHandle) -> Result<(), St
         for (index, source) in files.iter().enumerate() {
             let (width, height) = image::image_dimensions(source)
                 .map_err(|e| format!("Impossible de lire les dimensions de {} : {e}", source))?;
-            validate_image_size(width, height)?;
+            let large = exceeds_in_memory_limit(width, height);
+            if !large {
+                validate_image_size(width, height)?;
+            }
             validate_jpeg_dimensions(width, height)?;
-            let decoded =
-                image::open(source).map_err(|e| format!("Impossible d'ouvrir {} : {e}", source))?;
-            let rgb = decoded.into_rgb8();
-            let mut jpeg = Vec::new();
-            JpegEncoder::new_with_quality(&mut jpeg, 90)
-                .write_image(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
-                .map_err(|e| e.to_string())?;
+            let (jpeg_bytes, jpeg_path, jpeg_len) = if large {
+                let mapped = MappedRgba::open(Path::new(source))?;
+                let path = TemporaryOutput(mapped.save_temp_jpeg(90)?);
+                let len = fs::metadata(&path.0)
+                    .map_err(|error| error.to_string())?
+                    .len();
+                (None, Some(path), len)
+            } else {
+                let decoded = image::open(source)
+                    .map_err(|e| format!("Impossible d'ouvrir {} : {e}", source))?;
+                let rgb = decoded.into_rgb8();
+                let mut jpeg = Vec::new();
+                JpegEncoder::new_with_quality(&mut jpeg, 90)
+                    .write_image(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
+                    .map_err(|e| e.to_string())?;
+                let len = jpeg.len() as u64;
+                (Some(jpeg), None, len)
+            };
             let image_id = index as u32 * 3 + 3;
             let content_id = image_id + 1;
             let page_id = image_id + 2;
@@ -355,7 +382,7 @@ fn export_pdf(files: &[String], output: &Path, app: &AppHandle) -> Result<(), St
             let page_height = height as f64 * 0.24 * scale;
 
             offsets[image_id as usize] = offset;
-            let image_header = format!("<< /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n", jpeg.len());
+            let image_header = format!("<< /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {jpeg_len} >>\nstream\n");
             let object_head = format!("{image_id} 0 obj\n");
             writer
                 .write_all(object_head.as_bytes())
@@ -363,11 +390,16 @@ fn export_pdf(files: &[String], output: &Path, app: &AppHandle) -> Result<(), St
             writer
                 .write_all(image_header.as_bytes())
                 .map_err(|e| e.to_string())?;
-            writer.write_all(&jpeg).map_err(|e| e.to_string())?;
+            if let Some(jpeg) = jpeg_bytes {
+                writer.write_all(&jpeg).map_err(|e| e.to_string())?;
+            } else if let Some(path) = jpeg_path {
+                let mut file = File::open(&path.0).map_err(|error| error.to_string())?;
+                std::io::copy(&mut file, &mut writer).map_err(|error| error.to_string())?;
+            }
             writer
                 .write_all(b"\nendstream\nendobj\n")
                 .map_err(|e| e.to_string())?;
-            offset += object_head.len() as u64 + image_header.len() as u64 + jpeg.len() as u64 + 18;
+            offset += object_head.len() as u64 + image_header.len() as u64 + jpeg_len + 18;
 
             let content = format!("q\n{page_width:.2} 0 0 {page_height:.2} 0 0 cm\n/Im0 Do\nQ\n");
             offsets[content_id as usize] = offset;

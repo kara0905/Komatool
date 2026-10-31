@@ -1,7 +1,9 @@
 <script lang="ts">
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { invoke } from "@tauri-apps/api/core";
+  import { invoke, isTauri } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { relaunch } from "@tauri-apps/plugin-process";
+  import { check, type Update } from "@tauri-apps/plugin-updater";
   import { onMount } from "svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import AdjustmentsPanel from "./components/AdjustmentsPanel.svelte";
@@ -26,6 +28,8 @@
     CircleHelp,
     ArrowUpFromLine,
     Workflow,
+    Download,
+    RefreshCw,
   } from "lucide-svelte";
 
   type Mode = "fixed" | "smart" | "grid" | "manual";
@@ -85,6 +89,73 @@
   let previewLoading = $state(false);
   let previewRequest = 0;
   let previousPreviewSettings = "";
+  let availableUpdate = $state<Update | null>(null);
+  let checkingUpdate = $state(false);
+  let installingUpdate = $state(false);
+  let updateNoticeDismissed = $state(false);
+  let updateStatus = $state("");
+  let updateProgress = $state(0);
+  let updateBytes = 0;
+  let updateSize = $state(0);
+
+  // Vérifie les mises à jour sans empêcher l'ouverture de l'espace de travail.
+  async function checkForUpdates(showUpToDate = false) {
+    if (!isTauri() || checkingUpdate || installingUpdate) return;
+    checkingUpdate = true;
+    updateStatus = "";
+    try {
+      const update = await check();
+      if (update) {
+        if (availableUpdate) await availableUpdate.close();
+        availableUpdate = update;
+        updateNoticeDismissed = false;
+        updateStatus = `Version ${update.version} disponible`;
+      } else {
+        if (availableUpdate) await availableUpdate.close();
+        availableUpdate = null;
+        updateStatus = showUpToDate ? "KomaTool est à jour" : "";
+        if (showUpToDate) window.setTimeout(() => (updateStatus = ""), 4000);
+      }
+    } catch (cause) {
+      updateStatus = showUpToDate ? `Vérification impossible : ${String(cause)}` : "";
+    } finally {
+      checkingUpdate = false;
+    }
+  }
+
+  // Télécharge l'artefact signé et affiche la progression reçue de Tauri.
+  async function installAvailableUpdate() {
+    if (!availableUpdate || installingUpdate) return;
+    installingUpdate = true;
+    updateProgress = 0;
+    updateBytes = 0;
+    updateSize = 0;
+    updateStatus = "Téléchargement de la mise à jour…";
+    try {
+      await availableUpdate.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          updateSize = event.data.contentLength ?? 0;
+        } else if (event.event === "Progress") {
+          updateBytes += event.data.chunkLength;
+          if (updateSize > 0) updateProgress = Math.min(100, Math.round((updateBytes / updateSize) * 100));
+        } else if (event.event === "Finished") {
+          updateProgress = 100;
+          updateStatus = "Installation et redémarrage…";
+        }
+      });
+      await relaunch();
+    } catch (cause) {
+      updateStatus = `Installation impossible : ${String(cause)}`;
+      installingUpdate = false;
+    }
+  }
+
+  async function dismissAvailableUpdate() {
+    if (availableUpdate) await availableUpdate.close();
+    availableUpdate = null;
+    updateNoticeDismissed = true;
+    updateStatus = "";
+  }
 
   function reportError(cause: unknown) {
     error = String(cause);
@@ -92,6 +163,7 @@
   }
 
   onMount(() => {
+    void checkForUpdates();
     if (navigator.platform.toLowerCase().includes("mac")) {
       document.documentElement.classList.add("macos");
     }
@@ -392,6 +464,10 @@
     <div class="sidebar-bottom">
       <div class="local-pill"><span></span> Traitement local</div>
       <div class="version">KOMATOOL <span>v1</span></div>
+      <button class="update-check" onclick={() => checkForUpdates(true)} disabled={checkingUpdate || installingUpdate}>
+        <span class:spin={checkingUpdate}><RefreshCw size={11} /></span>
+        {checkingUpdate ? "Recherche…" : "Vérifier les mises à jour"}
+      </button>
     </div>
   </aside>
 
@@ -413,6 +489,27 @@
         </div>
       </div>
     </header>
+    {#if availableUpdate && !updateNoticeDismissed}
+      <div class="update-banner" role="status">
+        <div class="update-banner-icon"><Download size={17} /></div>
+        <div class="update-banner-copy">
+          <strong>KomaTool {availableUpdate.version} est disponible</strong>
+          <span>{installingUpdate ? (updateSize ? `Téléchargement · ${updateProgress}%` : updateStatus) : updateStatus.startsWith("Installation impossible") ? updateStatus : "La mise à jour sera installée puis l’application redémarrée."}</span>
+          {#if installingUpdate && updateSize > 0}
+            <div class="update-progress"><span style={`width:${updateProgress}%`}></span></div>
+          {/if}
+        </div>
+        <button class="update-install" onclick={installAvailableUpdate} disabled={installingUpdate}>
+          {installingUpdate ? "Installation…" : "Installer"}
+        </button>
+        {#if !installingUpdate}
+          <button class="update-later" onclick={dismissAvailableUpdate}>Plus tard</button>
+        {/if}
+      </div>
+    {/if}
+    {#if updateStatus && !availableUpdate && !checkingUpdate}
+      <div class="update-toast" role="status">{updateStatus}</div>
+    {/if}
     <section class="workspace">
       <div class="page-heading">
         <div>

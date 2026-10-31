@@ -164,6 +164,11 @@ pub(super) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 const MAX_IMAGE_PIXELS: u64 = 250_000_000;
 const MAX_JPEG_SIDE: u32 = u16::MAX as u32;
 
+/// Indique si une opération qui décode tout le bitmap dépasserait le budget RAM historique.
+pub(crate) fn exceeds_in_memory_limit(width: u32, height: u32) -> bool {
+    width as u64 * height as u64 > MAX_IMAGE_PIXELS
+}
+
 /// Refuse les dimensions qui dépassent la limite de côté définie par JPEG.
 pub(crate) fn validate_jpeg_dimensions(width: u32, height: u32) -> Result<(), String> {
     if width > MAX_JPEG_SIDE || height > MAX_JPEG_SIDE {

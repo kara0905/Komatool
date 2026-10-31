@@ -7,6 +7,7 @@ pub mod advanced_split;
 pub mod archive;
 pub mod common;
 pub mod convert;
+pub(crate) mod mapped_image;
 pub mod merge;
 pub mod pipeline;
 pub mod preview;

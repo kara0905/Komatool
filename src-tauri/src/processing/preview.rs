@@ -4,8 +4,9 @@ use serde::Serialize;
 use std::{io::Cursor, path::Path};
 
 use super::{
-    common::{encode_image, validate_image_size},
-    split::smart_boundaries,
+    common::{encode_image, exceeds_in_memory_limit, validate_image_size},
+    mapped_image::MappedRgba,
+    split::{smart_boundaries, smart_boundaries_raw},
     transform::{self, ImageAdjustments},
 };
 
@@ -60,10 +61,33 @@ pub fn create(
     // produit que de petites vignettes et n'écrit aucun fichier de sortie.
     let (source_width, source_height) = image::image_dimensions(source)
         .map_err(|e| format!("Impossible de lire les dimensions : {e}"))?;
-    validate_image_size(source_width, source_height)?;
-    let decoded = image::open(source).map_err(|e| format!("Impossible d'ouvrir l'image : {e}"))?;
-    let image = transform::apply(decoded, adjustments)?.into_rgba8();
-    let (width, image_height) = image.dimensions();
+    let large = exceeds_in_memory_limit(source_width, source_height);
+    let (image, mapped) = if large {
+        if adjustments.resize_width.is_some() {
+            return Err("L'aperçu d'une très grande image ne peut pas appliquer le redimensionnement sans dépasser la mémoire.".into());
+        }
+        let decoded = MappedRgba::open(source)?;
+        let mapped = decoded.crop_and_margin(
+            adjustments.crop_left,
+            adjustments.crop_top,
+            adjustments.crop_right,
+            adjustments.crop_bottom,
+            adjustments.margin,
+        )?;
+        (None, Some(mapped))
+    } else {
+        validate_image_size(source_width, source_height)?;
+        let decoded =
+            image::open(source).map_err(|e| format!("Impossible d'ouvrir l'image : {e}"))?;
+        let image = transform::apply(decoded, adjustments)?.into_rgba8();
+        (Some(image), None)
+    };
+    let (width, image_height) = if let Some(image) = image.as_ref() {
+        image.dimensions()
+    } else {
+        let mapped = mapped.as_ref().expect("image mappée");
+        (mapped.width, mapped.height)
+    };
     let (horizontal_cuts, vertical_cuts): (Vec<u32>, Vec<u32>) = match mode {
         "grid" => {
             if rows == 0 || rows > 100 || columns == 0 || columns > 100 {
@@ -78,11 +102,27 @@ pub fn create(
             if !(100..=1_000_000).contains(&height) {
                 return Err("La hauteur doit être comprise entre 100 et 1 000 000 pixels.".into());
             }
-            let cuts = smart_boundaries(&image, height, 512, |_, _| {})?
-                .into_iter()
-                .take_while(|(_, bottom)| *bottom < image_height)
-                .map(|(_, bottom)| bottom)
-                .collect();
+            let cuts = if let Some(mapped) = &mapped {
+                smart_boundaries_raw(
+                    mapped.bytes(),
+                    width,
+                    image_height,
+                    height,
+                    u32::MAX,
+                    |_, _| {},
+                )?
+            } else {
+                smart_boundaries(
+                    image.as_ref().expect("image standard"),
+                    height,
+                    512,
+                    |_, _| {},
+                )?
+            }
+            .into_iter()
+            .take_while(|(_, bottom)| *bottom < image_height)
+            .map(|(_, bottom)| bottom)
+            .collect();
             (cuts, Vec::new())
         }
         "manual" => {
@@ -140,7 +180,15 @@ pub fn create(
         .min(1.0);
     let proxy_width = ((width as f64 * proxy_scale).round() as u32).max(1);
     let proxy_height = ((image_height as f64 * proxy_scale).round() as u32).max(1);
-    let proxy = imageops::thumbnail(&image, proxy_width, proxy_height);
+    let proxy = if let Some(mapped) = &mapped {
+        mapped.thumbnail(proxy_width, proxy_height)
+    } else {
+        imageops::thumbnail(
+            image.as_ref().expect("image standard"),
+            proxy_width,
+            proxy_height,
+        )
+    };
 
     const MAX_PAGE_PREVIEWS: usize = 24;
     let page_count = (y_edges.len() - 1) * (x_edges.len() - 1);

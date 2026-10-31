@@ -16,6 +16,7 @@ dist/
 .env
 .env.*
 !.env.example
+/src-tauri/komatool-updater.key
 
 # OS/editor files and logs
 .DS_Store
