@@ -10,11 +10,31 @@ use image::{
 };
 use serde::Serialize;
 use std::{
+    cell::Cell,
     fs,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
 use tauri::{AppHandle, Emitter};
+
+thread_local! {
+    static PROGRESS_RANGE: Cell<Option<(f32, f32)>> = const { Cell::new(None) };
+}
+
+/// Convertit la progression locale d'une étape en progression du pipeline entier.
+pub(crate) struct ProgressRange(Option<(f32, f32)>);
+
+impl ProgressRange {
+    pub(crate) fn new(base: f32, span: f32) -> Self {
+        Self(PROGRESS_RANGE.with(|range| range.replace(Some((base, span)))))
+    }
+}
+
+impl Drop for ProgressRange {
+    fn drop(&mut self) {
+        PROGRESS_RANGE.with(|range| range.set(self.0));
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct TaskProgress {
@@ -24,6 +44,12 @@ pub(crate) struct TaskProgress {
 
 /// Transmet une étape du traitement à l'interface sans bloquer l'opération.
 pub(crate) fn emit_progress(app: &AppHandle, percent: f32, message: impl Into<String>) {
+    let percent = PROGRESS_RANGE.with(|range| {
+        range
+            .get()
+            .map(|(base, span)| base + percent * span)
+            .unwrap_or(percent)
+    });
     let _ = app.emit(
         "task-progress",
         TaskProgress {
@@ -135,7 +161,7 @@ pub(super) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     ab.len().cmp(&bbytes.len())
 }
 
-const MAX_IMAGE_PIXELS: u64 = 100_000_000;
+const MAX_IMAGE_PIXELS: u64 = 250_000_000;
 const MAX_JPEG_SIDE: u32 = u16::MAX as u32;
 
 /// Refuse les dimensions qui dépassent la limite de côté définie par JPEG.
@@ -256,14 +282,14 @@ pub(crate) fn validate_split_options(
     Ok(())
 }
 
-/// Limite les images à 100 millions de pixels pour borner la mémoire utilisée.
+/// Limite les images à 250 millions de pixels pour borner la mémoire utilisée.
 pub(crate) fn validate_image_size(width: u32, height: u32) -> Result<(), String> {
     let pixels = (width as u64)
         .checked_mul(height as u64)
         .ok_or_else(|| "Dimensions de l'image trop importantes.".to_string())?;
     if pixels > MAX_IMAGE_PIXELS {
         return Err(
-            "Image trop grande pour le traitement en mémoire (limite : 100 millions de pixels)."
+            "Image trop grande pour le traitement en mémoire (limite : 250 millions de pixels)."
                 .into(),
         );
     }

@@ -132,12 +132,14 @@ pub fn process(
         .sum();
     let mut total_after = 0u64;
     for (index, (source, dest)) in files.iter().zip(destinations.iter()).enumerate() {
+        let (width, height) = image::image_dimensions(source)
+            .map_err(|e| format!("Impossible de lire les dimensions de {} : {e}", source))?;
+        validate_image_size(width, height)?;
+        if matches!(format, OutputFormat::Jpeg) {
+            validate_jpeg_dimensions(width, height)?;
+        }
         let image =
             image::open(source).map_err(|e| format!("Impossible d'ouvrir {} : {e}", source))?;
-        validate_image_size(image.width(), image.height())?;
-        if matches!(format, OutputFormat::Jpeg) {
-            validate_jpeg_dimensions(image.width(), image.height())?;
-        }
         let start = index as f32 / files.len() as f32 * 100.0;
         let image_progress = 100.0 / files.len() as f32;
         emit_progress(

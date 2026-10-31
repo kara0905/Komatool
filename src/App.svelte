@@ -7,6 +7,8 @@
   import AdjustmentsPanel from "./components/AdjustmentsPanel.svelte";
   import ImageQueue from "./components/ImageQueue.svelte";
   import PageContactSheet from "./components/PageContactSheet.svelte";
+  import SelectField from "./components/SelectField.svelte";
+  import PipelineWorkspace from "./components/PipelineWorkspace.svelte";
   import {
     Scissors,
     Combine,
@@ -23,10 +25,11 @@
     WandSparkles,
     CircleHelp,
     ArrowUpFromLine,
+    Workflow,
   } from "lucide-svelte";
 
   type Mode = "fixed" | "smart" | "grid" | "manual";
-  type WorkspaceTab = "split" | "merge" | "combo" | "export" | "upscale" | "convert" | "optimize";
+  type WorkspaceTab = "split" | "merge" | "combo" | "export" | "upscale" | "convert" | "optimize" | "pipeline";
   type PagePreview = { number: number; width: number; height: number; dataUrl: string };
   type Preview = { width: number; height: number; pages: PagePreview[]; pagesTruncated: boolean };
   type Adjustments = { cropLeft: number; cropTop: number; cropRight: number; cropBottom: number; margin: number; resizeWidth: number | null };
@@ -66,6 +69,7 @@
   let waifuModel = $state<"cunet" | "anime">("cunet");
   let waifuDevice = $state<"auto" | "cpu">("auto");
   let toolFiles = $state<string[]>([]);
+  let pipelineFiles = $state<string[]>([]);
   let toolOutput = $state("");
   let toolFormat = $state("png");
   let toolQuality = $state(82);
@@ -123,6 +127,7 @@
           else if (imagePaths[0]) source = imagePaths[0];
         } else if (tab === "upscale") waifuFiles = unique(waifuFiles);
         else if (tab === "convert" || tab === "optimize") toolFiles = unique(toolFiles);
+        else if (tab === "pipeline") pipelineFiles = unique(pipelineFiles);
         else files = unique(files);
       }
     }).then((fn) => { if (disposed) fn(); else stopDrop = fn; });
@@ -355,7 +360,7 @@
   {#if dragActive}<div class="drop-overlay"><div><Plus size={28} /><strong>Déposez vos images</strong><span>Elles seront ajoutées à l’espace de travail actif.</span></div></div>{/if}
   <aside class="sidebar">
     <div class="brand">
-      <img class="brand-logo" src="/logo.png" alt="" />
+      <img class="brand-logo" src="/logo.png" alt="" draggable="false" />
       <div class="brand-name"><strong>KomaTool</strong></div>
     </div>
     <div class="side-label">ESPACE DE TRAVAIL</div>
@@ -383,6 +388,7 @@
     <button class:active={tab === "upscale"} class="nav-item" onclick={() => (tab = "upscale")}><ArrowUpFromLine size={17} /> Upscale <span class="nav-shortcut">05</span></button>
     <button class:active={tab === "convert"} class="nav-item" onclick={() => (tab = "convert")}><ImageIcon size={17} /> Conversion <span class="nav-shortcut">06</span></button>
     <button class:active={tab === "optimize"} class="nav-item" onclick={() => (tab = "optimize")}><Settings2 size={17} /> Optimisation <span class="nav-shortcut">07</span></button>
+    <button class:active={tab === "pipeline"} class="nav-item" onclick={() => (tab = "pipeline")}><Workflow size={17} /> Pipelines <span class="nav-shortcut">08</span></button>
     <div class="sidebar-bottom">
       <div class="local-pill"><span></span> Traitement local</div>
       <div class="version">KOMATOOL <span>v1</span></div>
@@ -412,25 +418,25 @@
         <div>
           <div class="eyebrow">
             ATELIER IMAGE <span>•</span>
-            {tab === "split" ? "01" : tab === "merge" ? "02" : tab === "combo" ? "03" : tab === "export" ? "04" : tab === "upscale" ? "05" : tab === "convert" ? "06" : "07"}
+            {tab === "split" ? "01" : tab === "merge" ? "02" : tab === "combo" ? "03" : tab === "export" ? "04" : tab === "upscale" ? "05" : tab === "convert" ? "06" : tab === "optimize" ? "07" : "08"}
           </div>
           <h1>
             {tab === "split"
               ? "Découper une planche"
               : tab === "merge"
                 ? "Fusionner des images"
-                : tab === "combo" ? "Fusionner & redécouper" : tab === "export" ? "Préparer un livre d’images" : tab === "upscale" ? "Upscaler des images de BD" : tab === "convert" ? "Convertir des images" : "Optimiser le poids des images"}
+                : tab === "combo" ? "Fusionner & redécouper" : tab === "export" ? "Préparer un livre d’images" : tab === "upscale" ? "Upscaler des images de BD" : tab === "convert" ? "Convertir des images" : tab === "optimize" ? "Optimiser le poids des images" : "Créer un pipeline d’images"}
           </h1>
           <p>
             {tab === "split"
               ? "Divisez une longue image en pages prêtes à être utilisées."
               : tab === "merge"
                 ? "Assemblez plusieurs images verticalement dans leur ordre de lecture."
-                : tab === "combo" ? "Assemblez vos images, puis découpez automatiquement le résultat." : tab === "export" ? "Regroupez vos pages dans un fichier CBZ ou PDF, avec leurs métadonnées." : tab === "upscale" ? "Agrandissez et débruitez vos planches avec des modèles Waifu2x pour illustrations." : tab === "convert" ? "Changez le format d’un lot d’images en une seule opération." : "Réduisez l’espace occupé par vos images et comparez le résultat."}
+                : tab === "combo" ? "Assemblez vos images, puis découpez automatiquement le résultat." : tab === "export" ? "Regroupez vos pages dans un fichier CBZ ou PDF, avec leurs métadonnées." : tab === "upscale" ? "Agrandissez et débruitez vos planches avec des modèles Waifu2x pour illustrations." : tab === "convert" ? "Changez le format d’un lot d’images en une seule opération." : tab === "optimize" ? "Réduisez l’espace occupé par vos images et comparez le résultat." : "Enchaînez plusieurs outils avec vos propres réglages et relancez-les facilement."}
           </p>
         </div>
         <div class="heading-icon">
-          {#if tab === "split"}<Scissors
+          {#if tab === "pipeline"}<Workflow size={24} />{:else if tab === "split"}<Scissors
               size={24}
             />{:else if tab === "merge"}<Combine
               size={24}
@@ -438,6 +444,9 @@
         </div>
       </div>
 
+      {#if tab === "pipeline"}
+        <PipelineWorkspace bind:files={pipelineFiles} />
+      {:else}
       <div class="content-grid">
         <div class="left-column">
           {#if tab === "split"}
@@ -477,12 +486,18 @@
                 {#if waifuFiles.length}<button class="text-btn" onclick={() => waifuFiles = []}><Trash2 size={14} /> Vider</button>{/if}
               </div>
               {#if waifuFiles.length}<ImageQueue files={waifuFiles} onfiles={(next) => waifuFiles = next} />
-              {:else}<button class="dropzone" onclick={addWaifuFiles}><div class="drop-icon"><Plus size={21} /></div><strong>Ajoutez vos planches</strong><span>PNG, JPG ou WebP · traitement local</span></button>{/if}
+              {:else}<button class="dropzone" onclick={addWaifuFiles}><div class="drop-icon"><Plus size={21} /></div><strong>Ajoutez vos planches</strong><span>PNG, JPG ou WebP</span></button>{/if}
             </section>
             <section class="panel">
               <div class="panel-head"><div class="step">02</div><div><h2>Réglages Waifu2x</h2><p>Modèles spécialisés dans les illustrations et les dessins.</p></div></div>
-              <div class="field-row"><div><span class="setting-title">Agrandissement</span><span class="field-hint">Facteur de mise à l’échelle</span></div><div class="choice-group"><button class:chosen={waifuScale === 2} onclick={() => waifuScale = 2}>×2</button><button class:chosen={waifuScale === 4} onclick={() => waifuScale = 4}>×4</button></div></div>
-              <label class="select-field">Réduction du bruit<select bind:value={waifuNoise}><option value={-1}>Désactivée</option><option value={0}>Légère</option><option value={1}>Faible</option><option value={2}>Moyenne</option><option value={3}>Forte</option></select></label>
+              <div class="field-row"><div><span class="setting-title">Agrandissement</span><span class="field-hint">×1 applique uniquement le débruitage</span></div><div class="choice-group"><button class:chosen={waifuScale === 1} onclick={() => waifuScale = 1}>×1</button><button class:chosen={waifuScale === 2} onclick={() => waifuScale = 2}>×2</button><button class:chosen={waifuScale === 4} onclick={() => waifuScale = 4}>×4</button></div></div>
+              <SelectField label="Réduction du bruit" bind:value={waifuNoise} options={[
+                { value: -1, label: "Désactivée" },
+                { value: 0, label: "Légère" },
+                { value: 1, label: "Faible" },
+                { value: 2, label: "Moyenne" },
+                { value: 3, label: "Forte" },
+              ]} />
               <div class="field-row"><div><span class="setting-title">Calcul</span><span class="field-hint">GPU automatique ou processeur</span></div><div class="choice-group"><button class:chosen={waifuDevice === "auto"} onclick={() => waifuDevice = "auto"}>Auto</button><button class:chosen={waifuDevice === "cpu"} onclick={() => waifuDevice = "cpu"}>CPU</button></div></div>
               <div class="model-choices">
                 <button class:chosen={waifuModel === "cunet"} class="model-choice" onclick={() => waifuModel = "cunet"}><strong>CUNet</strong><span>Meilleure qualité · détails fins</span></button>
@@ -496,7 +511,11 @@
               {#if toolFiles.length}<ImageQueue files={toolFiles} onfiles={(next) => toolFiles = next} />{:else}<button class="dropzone" onclick={addToolFiles}><div class="drop-icon"><Plus size={21} /></div><strong>Ajoutez vos images ici</strong><span>PNG, JPG, WebP, BMP ou TIFF</span></button>{/if}
             </section>
             <section class="panel"><div class="panel-head"><div class="step">02</div><div><h2>Réglages de sortie</h2><p>{tab === "convert" ? "Choisissez le format de destination." : "Choisissez une compression adaptée à vos images."}</p></div></div>
-              {#if tab === "convert"}<label class="select-field">Format cible<select bind:value={toolFormat}><option value="png">PNG · sans perte</option><option value="jpg">JPEG · avec perte</option><option value="webp">WebP · sans perte</option></select></label>{/if}
+              {#if tab === "convert"}<SelectField label="Format cible" bind:value={toolFormat} options={[
+                { value: "png", label: "PNG · sans perte" },
+                { value: "jpg", label: "JPEG · avec perte" },
+                { value: "webp", label: "WebP · sans perte" },
+              ]} />{/if}
               {#if tab === "optimize"}<div class="field-row"><div><span class="setting-title">Type de compression</span><span class="field-hint">Sans perte conserve chaque pixel</span></div><div class="choice-group"><button class:chosen={lossless} onclick={() => lossless = true}>Sans perte</button><button class:chosen={!lossless} onclick={() => lossless = false}>Avec perte</button></div></div>{/if}
               {#if (tab === "convert" && toolFormat === "jpg") || (tab === "optimize" && !lossless)}<label class="quality-control">Qualité JPEG <b>{toolQuality}%</b><input type="range" min="40" max="100" bind:value={toolQuality} /></label>{/if}
               {#if tab === "optimize"}<div class="info-note"><Sparkles size={16} /><span>{lossless ? "PNG utilise une compression sans perte. Les images déjà compactes peuvent ne pas beaucoup diminuer." : "JPEG réduit davantage le poids, avec une légère perte de qualité réglable."}</span></div>{/if}
@@ -715,7 +734,7 @@
                 ? "Une image sera divisée en plusieurs fichiers."
                 : tab === "merge"
                   ? "Les images seront assemblées verticalement."
-                : tab === "export" ? (includeComicInfo ? "Les pages et ComicInfo.xml seront réunis dans le CBZ." : "Les images seront réunies dans un fichier de lecture.") : tab === "upscale" ? "Waifu2x agrandira et débruitera vos images localement." : tab === "convert" ? "Vos images seront réencodées dans le format choisi." : tab === "optimize" ? `Compression ${lossless ? "sans perte (PNG)" : "avec perte (JPEG)"}.` : "Les images seront assemblées puis découpées en pages."}
+                : tab === "export" ? (includeComicInfo ? "Les pages et ComicInfo.xml seront réunis dans le CBZ." : "Les images seront réunies dans un fichier de lecture.") : tab === "upscale" ? (waifuScale === 1 ? "Waifu2x débruitera les images sans changer leurs dimensions." : `Waifu2x agrandira les images ×${waifuScale} et les débruitera selon le réglage choisi.`) : tab === "convert" ? "Vos images seront réencodées dans le format choisi." : tab === "optimize" ? `Compression ${lossless ? "sans perte (PNG)" : "avec perte (JPEG)"}.` : "Les images seront assemblées puis découpées en pages."}
             </p>
             <div class="summary-divider"></div>
             <div class="summary-line">
@@ -750,18 +769,11 @@
                 <span>Format</span><b>{png ? "PNG" : "JPG"}</b>
               </div>{/if}
             <div class="summary-divider"></div>
-            <div class="local-callout">
-              <div><Check size={14} /></div>
-              <span
-                >Traitement effectué localement. Aucune image n'est envoyée sur
-                Internet.</span
-              >
-            </div>
             <button class="run-button" disabled={busy} onclick={runTask}
               >{#if busy}<span class="spinner"></span> Traitement en cours{:else}<Play
                   size={16}
                   fill="currentColor"
-                /> {tab === "upscale" ? "Upscaler les images" : tab === "export" ? "Créer l’export" : tab === "convert" ? "Convertir les images" : tab === "optimize" ? "Optimiser les images" : "Lancer le traitement"}{/if}</button
+                /> {tab === "upscale" ? (waifuScale === 1 ? "Débruiter les images" : "Upscaler les images") : tab === "export" ? "Créer l’export" : tab === "convert" ? "Convertir les images" : tab === "optimize" ? "Optimiser les images" : "Lancer le traitement"}{/if}</button
             >
             <div class="shortcut-hint">
               <CircleHelp size={13} /> {tab === "upscale" || tab === "export" || tab === "convert" || tab === "optimize" ? "Les images seront traitées dans l’ordre affiché." : "Vérifiez l'ordre des images avant de lancer."}
@@ -782,6 +794,7 @@
           </div>
         </aside>
       </div>
+      {/if}
 
       {#if busy || done || error}<section
           class="task-status"

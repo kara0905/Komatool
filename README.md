@@ -10,6 +10,7 @@ KomaTool est une application de bureau pour préparer des planches d’images et
 - **Upscale** : agrandir des illustrations avec Waifu2x, ses modèles CUNet et Anime Art, et le calcul GPU ou CPU.
 - **Conversion** : convertir des images en PNG, JPEG ou WebP.
 - **Optimisation** : compresser sans perte ou réduire davantage le poids avec une compression JPEG réglable.
+- **Pipelines** : enregistrer des enchaînements personnalisés d’upscale, conversion, optimisation, découpe, fusion et export, choisir de conserver les résultats de chaque étape dans un sous-dossier, puis les relancer sur un nouveau lot d’images.
 - **Export lecture** : produire une archive CBZ avec métadonnées ComicInfo, ou un PDF.
 - Glisser-déposer, traitement par lots et indicateurs de progression.
 

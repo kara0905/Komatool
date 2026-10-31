@@ -8,9 +8,11 @@ pub mod archive;
 pub mod common;
 pub mod convert;
 pub mod merge;
+pub mod pipeline;
 pub mod preview;
 pub mod split;
 pub mod transform;
+pub mod waifu;
 
 #[cfg(test)]
 mod tests {

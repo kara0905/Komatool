@@ -17,6 +17,7 @@ pub fn run() {
             commands::export_cbz_metadata,
             commands::convert_images,
             commands::waifu2x_process,
+            commands::run_pipeline,
         ])
         .run(tauri::generate_context!())
         .expect("Erreur au démarrage de Komatool");

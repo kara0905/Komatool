@@ -334,12 +334,12 @@ fn export_pdf(files: &[String], output: &Path, app: &AppHandle) -> Result<(), St
         )?;
 
         for (index, source) in files.iter().enumerate() {
+            let (width, height) = image::image_dimensions(source)
+                .map_err(|e| format!("Impossible de lire les dimensions de {} : {e}", source))?;
+            validate_image_size(width, height)?;
+            validate_jpeg_dimensions(width, height)?;
             let decoded =
                 image::open(source).map_err(|e| format!("Impossible d'ouvrir {} : {e}", source))?;
-            validate_image_size(decoded.width(), decoded.height())?;
-            let width = decoded.width();
-            let height = decoded.height();
-            validate_jpeg_dimensions(width, height)?;
             let rgb = decoded.into_rgb8();
             let mut jpeg = Vec::new();
             JpegEncoder::new_with_quality(&mut jpeg, 90)
